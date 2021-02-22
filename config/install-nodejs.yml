@@ -1,0 +1,34 @@
+-
+  name: Ansible example Build Rest-API Server
+  hosts: all
+  gather_facts: yes
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+  
+  tasks:
+    - name: Remove APT Lock
+      shell: |
+        rm -rf /var/lib/apt/lists/lock
+        rm -rf /var/cache/apt/archives/lock
+        rm -rf /var/lib/dpkg/lock
+        mkdir -p ~/rest-api
+    - name: COPY Rest-API
+      copy:
+        src: dist.zip
+        dest: ~/rest-api/
+        owner: root
+        group: root
+        mode: u+rwx,g-rwx,o-rwx
+    - name: apt update
+      become_user: root
+      become: yes
+      apt:
+        force: yes
+        update_cache: yes
+    - name: install Node & NPM
+      shell: |
+        curl -sL https://deb.nodesource.com/setup_lts.x | bash -
+        apt-get install -y nodejs zip unzip
+        npm install pm2@latest -g
+        unzip ~/rest-api/dist.zip -d ~/rest-api/
+        

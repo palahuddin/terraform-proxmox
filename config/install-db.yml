@@ -1,0 +1,166 @@
+-
+  name: Ansible example DB Installation
+  hosts: dbserver
+  gather_facts: yes
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+  
+  tasks: 
+    - name: Preparing Environment
+      shell: |
+        fallocate -l 16G /swapfile
+        chmod 600 /swapfile
+        mkswap /swapfile
+        echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+        swapon /swapfile
+        wget --quiet -O - https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
+        echo "deb http://apt.postgresql.org/pub/repos/apt/ `lsb_release -cs`-pgdg main" |sudo tee  /etc/apt/sources.list.d/pgdg.list
+        cat /etc/hostname > hostname
+        systemctl disable --now apt-daily.timer
+        systemctl disable --now apt-daily-upgrade.timer
+        systemctl daemon-reload
+        
+    - name: Run APT Update
+      apt:
+        update_cache: yes
+        force: yes
+      register: apt_action
+      retries: 20
+      until: apt_action is success or ('Failed to lock apt for exclusive operation' not in apt_action.msg and '/var/lib/dpkg/lock' not in apt_action.msg)
+
+    - name: Install PostgresDB 12, PgBouncer, & Other Standar Apps
+      apt:
+        name: "{{ packages }}"
+        state: present
+      vars:
+        packages:
+        - postgresql-12
+        - pgbouncer
+        - pgbackrest
+        - python3-psycopg2
+        - rsync
+        - screen
+        - zip
+        - unzip
+        - git
+        - wget
+      register: apt_action
+      retries: 20
+      until: apt_action is success or ('Failed to lock apt for exclusive operation' not in apt_action.msg and '/var/lib/dpkg/lock' not in apt_action.msg)
+      
+    - name: Change Postgres Directory to /data
+      become: yes
+      become_user: root
+      shell: |
+          systemctl stop postgresql
+          mkdir -p /data
+          chown -R postgres:postgres /data
+          rm -rf /var/lib/postgresql/12/main/
+    - name: Login As PosgresSQL User
+      remote_user: root
+      become: yes
+      become_user: postgres
+      shell: /usr/lib/postgresql/12/bin/initdb -E UTF8 --locale=C -D /data
+    - name: Copy PostgreSQL Configuration
+      copy:
+        src: ../config/example-4.conf
+        dest: /etc/postgresql/12/main/conf.d/example-4.conf
+        owner: postgres
+        group: postgres
+        mode: u+rw,g-wx,o-rwx
+    - name: Copy PGBackrest 2.7
+      copy:
+        src: ../config/pgbackrest
+        dest: /usr/bin/pgbackrest
+        owner: postgres
+        group: postgres
+        mode: u+rwx,g-rwx,o-rwx
+    - name: Copy create_db.sql
+      copy:
+        src: ../config/create_db.sql
+        dest: /var/lib/postgresql/create_db.sql
+        owner: postgres
+        group: postgres
+        mode: u+rw,g-wx,o-rwx
+    - name: Copy pgbouncer.ini
+      copy:
+        src: ../config/pgbouncer-4.ini
+        dest: /etc/pgbouncer/pgbouncer.ini
+        owner: postgres
+        group: postgres
+        mode: u+rw,g-wx,o-rwx
+    - name: Copy PGBackrest Script Config Creator
+      copy:
+        src: ../config/pgbackrest.sh
+        dest: /opt/pgbackrest.sh
+        owner: postgres
+        group: postgres
+        mode: u+rwx,g-rwx,o-rwx
+    - name: Copy Move Tenant Script
+      copy:
+        src: '{{item}}'
+        dest: /var/lib/postgresql
+        owner: postgres
+        group: postgres
+        mode: u+rwx,g-rwx,o-rwx
+      loop:
+        - ../config/move_tenant.sh
+    - name: Starting PostgreSQL Service, Add SSH Key PGBackrest Host
+      become: yes
+      become_user: root
+      shell: |
+          systemctl restart postgresql
+          sed -i '/test -d/a ulimit -n 10000' /etc/init.d/pgbouncer
+          sed -i 's/ulimit -n 10000/    ulimit -n 10000/g' /etc/init.d/pgbouncer
+          sed -i '/test -d/a # increase max open files limit' /etc/init.d/pgbouncer
+          sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/g' /etc/ssh/sshd_config
+          systemctl daemon-reload
+          systemctl restart pgbouncer
+          systemctl restart sshd
+          mkdir -p /var/lib/postgresql/.ssh
+          /opt/pgbackrest.sh
+          echo "SUBSYSTEM==\"cpu\", ACTION==\"add\", TEST==\"online\", ATTR{online}==\"0\", ATTR{online}=\"1\""  > /lib/udev/rules.d/80-hotplug-cpu-mem.rules
+          echo "SUBSYSTEM==\"memory\", ACTION==\"add\", TEST==\"state\", ATTR{state}==\"offline\", ATTR{state}=\"online\"" >> /lib/udev/rules.d/80-hotplug-cpu-mem.rules
+          echo "host    all             all             192.168.0.0/24            md5" >> /etc/postgresql/12/main/pg_hba.conf 
+          echo "* hard nofile 3280086" >> /etc/security/limits.conf
+          echo "* soft nofile 3280086" >> /etc/security/limits.conf
+          echo "fs.file-max=3280086" >> /etc/sysctl.conf
+          sysctl -w fs.file-max=3280086
+          sysctl -p
+          systemctl restart postgresql
+          echo "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQDWXQJq2p6OCkiXOyOhrf8tuYkqttHwfXm1/yJr6GAoELS7pPa2NQ9ITAUVlZO2YqS9H+TCrbuwTp1ZSJpHNkM0MuhuSYDIFBWmH+5iXbTs7p7q+qFQJmotB0MNwuhXGQZrJD5tbAg7+SX2Vh+XFAGBzoloXHnjL5piSDL2SIG4LJZG8IiRtiAfLdGbepyRt9XWn7gmLVMKaA07PO8Xmh6zPKm41Wlp5CfCEcHbxOGikDi2deKBNkNnXKNRX5T4x39ka/FkuPYAKPPKvXHNXVZc4qjO2UgLVpXfUliQy1YT244fXFxYNu84bwhGFetUKh0SDH04Mk9M57h3nyCq7xATPdSZ1pJyNt7oiBY9xryeg7Eqz2Tc0Y/dP0hbkmHsjY3SdGk+IyNvaGqzwBIQCu7bMpjj4UrOUJqKu01Uprif6rSiIAo19VHoWUFmxpbRRlsh5ZuEtvRgv2MPD4FSBr21sfVlGZ/teEnuFJr/jV/o4erSZjyw7wCeTGN8QnJ0GAlTHLXozt3QJ68Yn6AYt7ev5+0PbvNttZTucDxDif0216qYrTVFM2XNsJKzDuZF7mWolOfAjPGAeji0rbtyPGqLX2GTO3AUbLt7TxtlXdwPwgUSxgyHfEaMtGSvtBJXxai9Yv3msGwudeRhT2ZEZorxB3qWWfSgj2xdZoefQknilw== pgbackrest@backrest" > /var/lib/postgresql/.ssh/authorized_keys
+          chown -R postgres:postgres /var/lib/postgresql/.ssh
+          chown -R postgres:postgres /etc/pgbackrest.conf
+          chmod 777 -R /tmp
+    - name: 
+      remote_user: root
+      become: yes
+      become_user: postgres
+      shell: |
+          psql -f /var/lib/postgresql/create_db.sql
+          rm -rf /var/lib/postgresql/create_db.sql
+        
+    - name: COPY user PostgreSQL to PGBouncer UserList
+      postgresql_query:
+        login_user: postgres
+        login_password: Ejoh7Eimoogh
+        login_host: 127.0.0.1
+        port: 19323
+        query: COPY (SELECT '"' || rolname || '" "' || CASE WHEN rolpassword IS null THEN '' ELSE rolpassword END || '"' FROM pg_authid) TO '/etc/pgbouncer/userlist.txt';
+    - name: Generate SSH-KEY postgres user
+      remote_user: root
+      become: yes
+      become_user: postgres
+      openssh_keypair:
+        path: /var/lib/postgresql/.ssh/id_rsa
+        force: True
+    - name: Copy SSH Key to Local Workspace Builders
+      fetch:
+        src: /var/lib/postgresql/.ssh/id_rsa.pub
+        dest: ../tmp/
+        flat: yes
+    - name: Copy Hostname to Local Workspace Builders
+      fetch:
+        src: ~/hostname
+        dest: ../tmp/
+        flat: yes

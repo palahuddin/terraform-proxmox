@@ -1,0 +1,6 @@
+-
+  name: Test Koneksi All Target Host
+  hosts: all
+  tasks:
+    - name: test ping
+      ping: 

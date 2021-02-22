@@ -1,0 +1,33 @@
+-
+  name: Ansible example DB Installation
+  hosts: stdserver
+  gather_facts: yes
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+  
+  tasks: 
+    - name: apt update
+      apt:
+        force: yes
+        update_cache: yes
+    - name: Install Standar Apps
+      apt:
+        name: "{{ packages }}"
+        state: present
+      vars:
+        packages:
+        - curl
+        - rsync
+        - screen
+        - zip
+        - unzip
+        - git
+        - wget
+
+    - name: SSH Config
+      shell: |
+          sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/g' /etc/ssh/sshd_config
+          rm -rf .ssh/known_hosts
+          systemctl restart sshd
+
+

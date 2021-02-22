@@ -1,0 +1,14 @@
+-
+  name: Provisioning...
+  hosts: all
+  gather_facts: yes
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+
+  tasks:
+    - name: Update SSHKEY Root
+      become_user: root
+      become: yes
+      shell: |
+          cat /home/example/.ssh/authorized_keys > /root/.ssh/authorized_keys
+

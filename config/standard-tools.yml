@@ -1,0 +1,78 @@
+-
+  name: Ansible example Install Standard Tools
+  hosts: all
+  gather_facts: yes
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+
+  tasks:
+    - name: kill APT
+      become_user: root
+      become: yes
+      shell: |
+          cat /home/example/.ssh/authorized_keys > /root/.ssh/authorized_keys
+
+    - name: apt update
+      become_user: root
+      become: yes
+      apt:
+        force: yes
+        update_cache: yes
+        
+    - name: Install required system packages
+      become_user: root
+      become: yes
+      apt: name={{ item }} state=latest update_cache=yes
+      loop: [ 'apt-transport-https', 'ca-certificates', 'software-properties-common']
+
+    - name: Add Docker GPG apt Key
+      become_user: root
+      become: yes
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Add Docker Repositsory
+      become_user: root
+      become: yes
+      apt_repository:
+        repo: deb https://download.docker.com/linux/ubuntu bionic stable
+        state: present
+
+    - name: apt update
+      become_user: root
+      become: yes
+      apt:
+        force: yes
+        
+    - name: Install Standar Apps
+      become_user: root
+      become: yes
+      apt:
+        name: "{{ packages }}"
+        state: present
+      vars:
+        packages:
+        - rsync
+        - screen
+        - zip
+        - unzip
+        - git
+        - wget
+        - curl
+        - nano
+
+    - name: Update apt and install docker-ce
+      become_user: root
+      become: yes
+      apt: update_cache=yes name=docker-ce state=latest
+
+    - name: Change SSH Port
+      become_user: root
+      become: yes
+      shell: |
+          sed -i 's/#Port 22/Port 9922/g' /etc/ssh/sshd_config
+          systemctl restart sshd
+          touch /etc/cloud/cloud-init.disabled
+          systemctl disable docker
+          systemctl stop docker

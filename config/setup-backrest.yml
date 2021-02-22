@@ -1,0 +1,33 @@
+-
+  name: Ansible example DB Backrest Setup
+  hosts: pgbackrest
+  gather_facts: yes
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+  
+  tasks:
+    - name: Copy Artifact
+      copy:
+        src: '{{item}}'
+        dest: /tmp
+        owner: backrest
+        group: backrest
+        mode: u+rwx,g-rwx,o-rwx
+      loop:
+        - ../tmp/hostname
+        - ../tmp/pgbackrest-host.sh
+        - ../tmp/id_rsa.pub
+        - ../tmp/ipaddr
+
+    - name: Add Host DB Server
+      shell: |
+        cd /tmp
+        echo "$(cat ipaddr) $(cat hostname).example.com" >> /etc/hosts
+
+    - name: Run Script Create Stanza & Backup First Time
+      become: yes
+      become_user: backrest    
+      shell: |
+        cd /tmp
+        ./pgbackrest-host.sh
+        ./run-pg.sh
