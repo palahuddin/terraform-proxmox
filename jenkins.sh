@@ -7,6 +7,15 @@ sed -i '/NewServers/,$d' output.tf
 echo "###NewServers###" > output.tf
 
 echo "
+
+provider \"proxmox\" {
+    pm_api_url = \"https://192.168.0.1:8006/api2/json\"
+    pm_tls_insecure = \"true\"
+
+}
+
+
+
 resource \"proxmox_vm_qemu\" \"example_$3\" {
     name        = \"$3\"
     vmid       = 4$4
